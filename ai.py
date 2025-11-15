@@ -1,50 +1,137 @@
 # ai.py
-import openai
 import os
+import json
+import asyncio
+from openai import OpenAI
+from memory import MemoryDB
+from image_gen import generate_image
+from audio import text_to_speech
+import uuid
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+memory = MemoryDB()
 
-class NeuralicAI:
-    def __init__(self):
-        self.text_model = "gpt-4o"
-        self.realtime_model = "gpt-4o-realtime-preview"
+CHAT_MODEL = "gpt-4o"
+SYSTEM_PROMPT = (
+    "You are Neuralic AI. You can answer normally, or when asked to plan or act, "
+    "emit JSON in the following format (no extra text):\n"
+    '{"action": "speak"|"generate_image"|"remember"|"none", "content": "..."}\n'
+    "When autonomous, pick an action and content. Keep JSON small and valid."
+)
 
-    async def ask_text(self, user_id, message):
-        response = openai.ChatCompletion.create(
-            model=self.text_model,
-            messages=[{"role": "user", "content": message}]
-        )
-        return response.choices[0].message["content"]
+# ---------------------
+# Text Chat
+# ---------------------
+async def ask_text(user_id, message, personality=None):
+    """
+    Ask AI a question and get a text reply.
+    """
+    # Retrieve relevant memory
+    mems = memory.query(message)
+    mem_texts = []
+    for m in mems:
+        md = getattr(m, "metadata", None) or m.get("metadata", {})
+        if md and md.get("text"):
+            mem_texts.append(md["text"])
+    mem_context = "\n".join(mem_texts) if mem_texts else ""
 
-    async def start_realtime_session(self):
-        self.session = openai.realtime.sessions.create(
-            model=self.realtime_model
-        )
-        return self.session
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": f"Relevant memories:\n{mem_context}"},
+        {"role": "user", "content": message}
+    ]
 
-    async def process_realtime(self):
-        events = openai.realtime.sessions.receive(self.session.id)
-        processed = []
+    resp = openai_client.chat.completions.create(
+        model=CHAT_MODEL, 
+        messages=messages, 
+        temperature=0.7
+    )
+    text = resp.choices[0].message["content"]
+    # Store AI reply in memory
+    memory.store(user_id, f"assistant: {text}")
+    return text
 
-        for e in events:
-            if e.type == "response.output_text.delta":
-                processed.append({"type": "message", "data": e.delta})
+# ---------------------
+# Autonomous Decision-Making
+# ---------------------
+async def decide_action(user_id, context=""):
+    """
+    Ask AI to decide an action in JSON format.
+    """
+    prompt = f"User: {user_id}\nContext: {context}\nDecide one action and respond only with JSON."
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": prompt}
+    ]
+    resp = openai_client.chat.completions.create(
+        model=CHAT_MODEL, 
+        messages=messages, 
+        temperature=0.9, 
+        max_tokens=300
+    )
+    txt = resp.choices[0].message["content"].strip()
+    try:
+        start = txt.find("{")
+        end = txt.rfind("}") + 1
+        j = txt[start:end]
+        action = json.loads(j)
+        return action
+    except Exception as e:
+        print("Action parse error:", e, "raw:", txt)
+        return {"action": "none", "content": ""}
 
-            if e.type == "response.output_audio.delta":
-                processed.append({"type": "audio", "data": e.delta})
+# ---------------------
+# Autonomous Loop
+# ---------------------
+_autonomous_tasks = {}  # user_id -> asyncio.Task
 
-            if e.type == "response.function_call":
-                processed.append({
-                    "type": "action",
-                    "name": e.name,
-                    "arguments": e.arguments
-                })
+async def _run_autonomous_loop(user_id, interval=30):
+    """
+    Run autonomous actions every `interval` seconds.
+    """
+    while True:
+        context = "Autonomous thinking"
+        action = await decide_action(user_id, context)
 
-        return processed
+        if action["action"] == "speak" and action.get("content"):
+            # Store memory and create TTS
+            memory.store(user_id, f"AI (autonomous): {action['content']}")
+            fname, path = text_to_speech(action["content"])
+            print(f"[Autonomous] speak: {action['content']} -> {fname}")
 
-    def add_user_message(self, text):
-        openai.realtime.messages.create(
-            session_id=self.session.id,
-            role="user",
-            content=text
-        )
+        elif action["action"] == "generate_image" and action.get("content"):
+            # Generate image asynchronously
+            img = await generate_image(action["content"])
+            memory.store(user_id, f"AI generated image: {action['content']} -> {img['url']}")
+            print(f"[Autonomous] image: {img['url']}")
+
+        elif action["action"] == "remember" and action.get("content"):
+            memory.store(user_id, action["content"])
+            print(f"[Autonomous] remembered: {action['content']}")
+
+        # else do nothing
+        await asyncio.sleep(interval)
+
+# ---------------------
+# Start/Stop Autonomous
+# ---------------------
+def start_autonomous(user_id, interval=30):
+    """
+    Start autonomous loop for a user.
+    """
+    if user_id in _autonomous_tasks:
+        return False
+    loop = asyncio.get_event_loop()
+    task = loop.create_task(_run_autonomous_loop(user_id, interval))
+    _autonomous_tasks[user_id] = task
+    return True
+
+def stop_autonomous(user_id):
+    """
+    Stop autonomous loop for a user.
+    """
+    task = _autonomous_tasks.pop(user_id, None)
+    if task:
+        task.cancel()
+        return True
+    return False
