@@ -1,6 +1,6 @@
 # memory.py
 import os
-from pinecone import Pinecone, ServerlessSpec
+from pinecone import Pinecone, Index, ServerlessSpec
 from openai import OpenAI
 
 # ---------------------------
@@ -19,7 +19,7 @@ if not all([OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENVIRONMENT, PINECONE_IND
 # ---------------------------
 pc = Pinecone(api_key=PINECONE_API_KEY)
 
-# Check if index exists, otherwise create
+# Create index if it doesn't exist
 if PINECONE_INDEX not in pc.list_indexes().names():
     pc.create_index(
         name=PINECONE_INDEX,
@@ -31,7 +31,8 @@ if PINECONE_INDEX not in pc.list_indexes().names():
         )
     )
 
-index = pc.index(PINECONE_INDEX)
+# Use Index() directly
+index = Index(PINECONE_INDEX)
 
 # ---------------------------
 # INIT OPENAI EMBEDDINGS
