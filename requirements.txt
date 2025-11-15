@@ -1,5 +1,7 @@
-flask
-openai>=1.0.0
-pinecone>=4.0.0
-python-multipart
+
+fastapi
+uvicorn
+openai
+pinecone
 requests
+python-multipart
