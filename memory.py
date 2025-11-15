@@ -1,32 +1,40 @@
 # memory.py
 import os
-import pinecone
+from pinecone import Pinecone, ServerlessSpec
 from openai import OpenAI
 
 # ---------------------------
-# CHECK ENVIRONMENT VARIABLES
+# ENVIRONMENT VARIABLES
 # ---------------------------
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")
-PINECONE_INDEX = os.getenv("PINECONE_INDEX")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")  # e.g., "us-west1-gcp"
+PINECONE_INDEX = os.getenv("PINECONE_INDEX")  # e.g., "neuralic-memory"
 
-if not all([PINECONE_API_KEY, PINECONE_ENVIRONMENT, PINECONE_INDEX, OPENAI_API_KEY]):
+if not all([OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENVIRONMENT, PINECONE_INDEX]):
     raise Exception("Missing Pinecone or OpenAI environment variables")
 
 # ---------------------------
-# INITIALIZE PINECONE
+# INIT PINECONE
 # ---------------------------
-pinecone.init(
-    api_key=PINECONE_API_KEY,
-    environment=PINECONE_ENVIRONMENT
-)
+pc = Pinecone(api_key=PINECONE_API_KEY)
 
-# Connect to index (will raise error if it doesn't exist)
-index = pinecone.Index(PINECONE_INDEX)
+# Check if index exists, otherwise create
+if PINECONE_INDEX not in pc.list_indexes().names():
+    pc.create_index(
+        name=PINECONE_INDEX,
+        dimension=1536,
+        metric="cosine",
+        spec=ServerlessSpec(
+            cloud="aws",  # or gcp depending on your account
+            region=PINECONE_ENVIRONMENT
+        )
+    )
+
+index = pc.index(PINECONE_INDEX)
 
 # ---------------------------
-# INITIALIZE OPENAI EMBEDDINGS
+# INIT OPENAI EMBEDDINGS
 # ---------------------------
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
