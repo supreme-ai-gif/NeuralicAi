@@ -2,4 +2,4 @@ fastapi
 uvicorn
 openai
 pinecone
-python-dotenv
+python-multipart
