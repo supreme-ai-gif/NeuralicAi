@@ -1,18 +1,38 @@
 # main.py
+import os
 import uvicorn
 from fastapi import FastAPI, WebSocket, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
+
 from ai import NeuralicAI
 from memory import MemoryDB
 from image_gen import generate_image
 from audio import decode_audio, encode_audio
 from actions import handle_ai_action
 
-app = FastAPI()
+# ---------------------------
+# ENVIRONMENT CHECK
+# ---------------------------
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")
+PINECONE_INDEX = os.getenv("PINECONE_INDEX")
+
+if not all([OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENVIRONMENT, PINECONE_INDEX]):
+    raise Exception(
+        "Missing one or more environment variables: OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENVIRONMENT, PINECONE_INDEX"
+    )
+
+# ---------------------------
+# INIT APP
+# ---------------------------
+app = FastAPI(title="Neuralic AI")
 ai = NeuralicAI()
 memory = MemoryDB()
 
-# Allow any frontend to connect
+# ---------------------------
+# CORS
+# ---------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,6 +41,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ---------------------------
+# TEXT CHAT ENDPOINT
+# ---------------------------
 @app.post("/chat")
 async def chat_text(
     user_id: str = Form(...),
@@ -31,12 +54,18 @@ async def chat_text(
     memory.store(user_id, reply)
     return {"reply": reply}
 
+# ---------------------------
+# IMAGE GENERATION ENDPOINT
+# ---------------------------
 @app.post("/image")
 async def image(user_id: str = Form(...), prompt: str = Form(...)):
     img_url = await generate_image(prompt)
     memory.store(user_id, f"[IMAGE CREATED] {prompt}")
     return {"image_url": img_url}
 
+# ---------------------------
+# REALTIME VOICE / WEBSOCKET ENDPOINT
+# ---------------------------
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
@@ -49,7 +78,6 @@ async def websocket_endpoint(ws: WebSocket):
             audio_text = decode_audio(data)
             if audio_text:
                 ai.add_user_message(audio_text)
-
                 memory.store("voice-user", audio_text)
 
             ai_events = await ai.process_realtime()
@@ -70,5 +98,9 @@ async def websocket_endpoint(ws: WebSocket):
     except Exception:
         await ws.close()
 
+# ---------------------------
+# RUN APP (RENDER COMPATIBLE)
+# ---------------------------
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=10000)
+    port = int(os.environ.get("PORT", 10000))  # Render provides dynamic PORT
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
