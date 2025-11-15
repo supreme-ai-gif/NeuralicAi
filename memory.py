@@ -1,43 +1,43 @@
 # memory.py
 import os
-from pinecone import Pinecone, Index, ServerlessSpec
+from pinecone import Pinecone, ServerlessSpec
 from openai import OpenAI
 
 # ---------------------------
-# ENVIRONMENT VARIABLES
+# ENV VARIABLES
 # ---------------------------
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")  # e.g., "us-west1-gcp"
-PINECONE_INDEX = os.getenv("PINECONE_INDEX")  # e.g., "neuralic-memory"
+PINECONE_INDEX = os.getenv("PINECONE_INDEX")  # your index name
+PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")  # aws or gcp region
 
-if not all([OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENVIRONMENT, PINECONE_INDEX]):
-    raise Exception("Missing Pinecone or OpenAI environment variables")
+if not all([OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_INDEX, PINECONE_ENVIRONMENT]):
+    raise Exception("Missing environment variables")
 
 # ---------------------------
-# INIT PINECONE
+# INIT CLIENTS
 # ---------------------------
 pc = Pinecone(api_key=PINECONE_API_KEY)
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Create index if it doesn't exist
+# ---------------------------
+# CREATE INDEX (IF MISSING)
+# ---------------------------
 if PINECONE_INDEX not in pc.list_indexes().names():
     pc.create_index(
         name=PINECONE_INDEX,
         dimension=1536,
         metric="cosine",
         spec=ServerlessSpec(
-            cloud="aws",  # or gcp depending on your account
+            cloud="aws",
             region=PINECONE_ENVIRONMENT
         )
     )
 
-# Use Index() directly
-index = Index(PINECONE_INDEX)
-
 # ---------------------------
-# INIT OPENAI EMBEDDINGS
+# CONNECT TO THE INDEX
 # ---------------------------
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
+index = pc.Index(PINECONE_INDEX)
 
 # ---------------------------
 # MEMORY CLASS
@@ -47,24 +47,31 @@ class MemoryDB:
         self.index = index
         self.embed = openai_client
 
-    def embed_text(self, text: str):
-        """Create vector embedding for text"""
-        resp = self.embed.embeddings.create(
+    def embed_text(self, text):
+        """Generate embedding"""
+        res = self.embed.embeddings.create(
             model="text-embedding-3-small",
             input=text
         )
-        return resp.data[0].embedding
+        return res.data[0].embedding
 
-    def store(self, user_id: str, text: str):
-        """Store a message or memory in Pinecone"""
+    def store(self, user_id, text):
+        """Store memory"""
         vec = self.embed_text(text)
-        self.index.upsert([(user_id, vec, {"text": text})])
+        self.index.upsert([
+            {
+                "id": user_id,
+                "values": vec,
+                "metadata": {"text": text}
+            }
+        ])
 
-    def query(self, user_id: str, top_k: int = 5):
-        """Retrieve top-k related memories"""
-        resp = self.index.query(
-            vector=self.embed_text(user_id),
+    def query(self, text, top_k=5):
+        """Semantic search in memory"""
+        vec = self.embed_text(text)
+        result = self.index.query(
+            vector=vec,
             top_k=top_k,
             include_metadata=True
         )
-        return resp.matches
+        return result.matches
