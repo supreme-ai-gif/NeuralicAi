@@ -1,106 +1,82 @@
 # main.py
 import os
-import uvicorn
-from fastapi import FastAPI, WebSocket, UploadFile, Form
-from fastapi.middleware.cors import CORSMiddleware
+from flask import Flask, request, jsonify
+from openai import OpenAI
+from memory import MemoryDB  # Your updated memory file
 
-from ai import NeuralicAI
-from memory import MemoryDB
-from image_gen import generate_image
-from audio import decode_audio, encode_audio
-from actions import handle_ai_action
+app = Flask(__name__)
 
-# ---------------------------
-# ENVIRONMENT CHECK
-# ---------------------------
+# -----------------------------------
+# ENVIRONMENT VARIABLES
+# -----------------------------------
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")
-PINECONE_INDEX = os.getenv("PINECONE_INDEX")
+if not OPENAI_API_KEY:
+    raise Exception("Missing OPENAI_API_KEY")
 
-if not all([OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENVIRONMENT, PINECONE_INDEX]):
-    raise Exception(
-        "Missing one or more environment variables: OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENVIRONMENT, PINECONE_INDEX"
-    )
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-# ---------------------------
-# INIT APP
-# ---------------------------
-app = FastAPI(title="Neuralic AI")
-ai = NeuralicAI()
 memory = MemoryDB()
 
-# ---------------------------
-# CORS
-# ---------------------------
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
-# ---------------------------
-# TEXT CHAT ENDPOINT
-# ---------------------------
-@app.post("/chat")
-async def chat_text(
-    user_id: str = Form(...),
-    message: str = Form(...)
-):
-    memory.store(user_id, message)
-    reply = await ai.ask_text(user_id, message)
-    memory.store(user_id, reply)
-    return {"reply": reply}
+# -----------------------------------
+# ROUTES
+# -----------------------------------
 
-# ---------------------------
-# IMAGE GENERATION ENDPOINT
-# ---------------------------
-@app.post("/image")
-async def image(user_id: str = Form(...), prompt: str = Form(...)):
-    img_url = await generate_image(prompt)
-    memory.store(user_id, f"[IMAGE CREATED] {prompt}")
-    return {"image_url": img_url}
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({"message": "AI server is running!"})
 
-# ---------------------------
-# REALTIME VOICE / WEBSOCKET ENDPOINT
-# ---------------------------
-@app.websocket("/ws")
-async def websocket_endpoint(ws: WebSocket):
-    await ws.accept()
-    session = await ai.start_realtime_session()
 
-    try:
-        while True:
-            data = await ws.receive_bytes()
+@app.route("/chat", methods=["POST"])
+def chat():
+    data = request.json
+    user_id = data.get("user_id", "default_user")
+    user_message = data.get("message", "")
 
-            audio_text = decode_audio(data)
-            if audio_text:
-                ai.add_user_message(audio_text)
-                memory.store("voice-user", audio_text)
+    if not user_message:
+        return jsonify({"error": "Message is required"}), 400
 
-            ai_events = await ai.process_realtime()
+    # -------------------------
+    # 1. Search memory
+    # -------------------------
+    memories = memory.query(user_message)
 
-            for event in ai_events:
-                if event["type"] == "audio":
-                    audio_chunk = encode_audio(event["data"])
-                    await ws.send_bytes(audio_chunk)
+    memory_texts = []
+    for m in memories:
+        if "metadata" in m and "text" in m['metadata']:
+            memory_texts.append(m['metadata']['text'])
 
-                elif event["type"] == "message":
-                    memory.store("voice-ai", event["data"])
-                    await ws.send_json({"reply": event["data"]})
+    memory_context = "\n".join(memory_texts) if memory_texts else "No memory found."
 
-                elif event["type"] == "action":
-                    result = await handle_ai_action(event)
-                    await ws.send_json({"action_result": result})
+    # -------------------------
+    # 2. Send to GPT-4o
+    # -------------------------
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "You are a helpful AI assistant with memory."},
+            {"role": "system", "content": f"Relevant memories:\n{memory_context}"},
+            {"role": "user", "content": user_message}
+        ]
+    )
 
-    except Exception:
-        await ws.close()
+    ai_reply = response.choices[0].message["content"]
 
-# ---------------------------
-# RUN APP (RENDER COMPATIBLE)
-# ---------------------------
+    # -------------------------
+    # 3. Store new memory
+    # -------------------------
+    memory.store(user_id, f"user: {user_message}")
+    memory.store(user_id, f"assistant: {ai_reply}")
+
+    return jsonify({
+        "reply": ai_reply,
+        "memories_used": memory_texts
+    })
+
+
+# -----------------------------------
+# START SERVER ON RENDER
+# -----------------------------------
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))  # Render provides dynamic PORT
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
