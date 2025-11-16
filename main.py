@@ -50,7 +50,6 @@ async def admin_revoke_key(key: str = Form(...), password: str = Form(...)):
     result = revoke_key(key)
     return {"success": result}
 
-
 # AI endpoints
 @app.post("/chat")
 async def chat_endpoint(user_id: str = Form(...), message: str = Form(...), api_key: str = Form(...)):
