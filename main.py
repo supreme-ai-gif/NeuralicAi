@@ -77,11 +77,40 @@ def process_voice(user_id, file: UploadFile):
     return text_response, audio_base64
 
 # =====================================================
-# Chat Logic (Placeholder)
+# Chat Logic (GPT-powered)
 # =====================================================
+import openai
+openai.api_key = os.getenv("OPENAI_API_KEY")  # Make sure your key is set in Render
+
 def process_chat(user_id: str, message: str):
-    store_memory(user_id, message)
-    return f"Echo from AI for {user_id}: {message}"
+    """
+    Processes a chat message using OpenAI GPT-4 and stores the conversation in memory.
+    """
+    # Store user message in memory
+    store_memory(user_id, f"User: {message}")
+
+    # Prepare conversation history
+    history = get_memory(user_id)
+    conversation = "\n".join(history) + f"\nAI:"
+
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a helpful AI assistant."},
+                {"role": "user", "content": conversation}
+            ],
+            temperature=0.7,
+            max_tokens=300
+        )
+        ai_reply = response.choices[0].message['content'].strip()
+    except Exception as e:
+        ai_reply = f"Error: {str(e)}"
+
+    # Store AI reply in memory
+    store_memory(user_id, f"AI: {ai_reply}")
+
+    return ai_reply
 
 # =====================================================
 # FastAPI Setup
