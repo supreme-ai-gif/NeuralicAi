@@ -8,7 +8,7 @@ import os
 # Import modular files
 from memory import store_memory, get_memory
 from image_gen import generate_image
-from voice import process_voice
+from voice_utils import process_voice
 from decision_maker import make_decision
 
 # Chat endpoint
