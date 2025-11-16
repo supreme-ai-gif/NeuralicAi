@@ -1,6 +1,8 @@
 from fastapi import FastAPI, Form, UploadFile, File
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.templating import Jinja2Templates
+from fastapi import Request
 import uvicorn
 
 # ----------------------------
@@ -26,7 +28,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+templates = Jinja2Templates(directory="templates"
+                            
 # ----------------------------
 # SIMPLE CHAT ENDPOINT
 # ----------------------------
@@ -74,18 +77,8 @@ async def image_endpoint(prompt: str = Form(...)):
 # BASIC HOMEPAGE
 # ----------------------------
 @app.get("/", response_class=HTMLResponse)
-async def index():
-    return """
-    <h1>Neuralic AI Server Running</h1>
-    <p>Available endpoints:</p>
-    <ul>
-        <li>/chat</li>
-        <li>/decision</li>
-        <li>/voice</li>
-        <li>/image</li>
-    </ul>
-    """
-
+async def index(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 # ----------------------------
 # RUN SERVER
 # ----------------------------
