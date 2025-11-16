@@ -6,3 +6,4 @@ openai
 pinecone
 requests
 python-multipart
+fastapi[all]
