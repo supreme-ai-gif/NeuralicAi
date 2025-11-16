@@ -198,30 +198,32 @@ def process_chat(user_id: str, message: str):
     store_memory(user_id, f"AI: {ai_reply}")
 
     return ai_reply
-
 # =====================================================
-# FastAPI Setup
+# FastAPI Setup with CORS
 # =====================================================
 app = FastAPI(title="Neuralic AI Full Server")
+
 # -----------------------------
 # CORS Middleware
 # -----------------------------
+# Replace with your frontend URL(s). For local dev:
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For testing. Later, replace "*" with your admin site URL
+    allow_origins=["*"],  # allow all origins 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount static files and templates AFTER CORS
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 MASTER_PASSWORD = os.getenv("MASTER_PASSWORD", "supersecretpassword")
 
 # =====================================================
-# ADMIN ENDPOINTS (FULLY INTEGRATED)
+# ADMIN ENDPOINTS
 # =====================================================
-
 @app.post("/admin/create_key")
 async def admin_create_key(owner: str = Form(...), password: str = Form(...)):
     if password != MASTER_PASSWORD:
@@ -245,7 +247,6 @@ async def admin_revoke_key(key: str = Form(...), password: str = Form(...)):
 # =====================================================
 # AI ENDPOINTS
 # =====================================================
-
 @app.post("/chat")
 async def chat_endpoint(
     user_id: str = Form(...),
