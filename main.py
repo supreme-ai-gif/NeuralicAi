@@ -45,15 +45,15 @@ async def chat_endpoint(user_id: str = Form(...), message: str = Form(...), api_
         raise HTTPException(status_code=401, detail="Invalid API key")
     return {"reply": process_chat(user_id, message)}
 
+
 @app.post("/image")
 async def image_endpoint(prompt: str = Form(...), api_key: str = Form(...)):
-    from api_keys import verify_api_key
     if not verify_api_key(api_key):
         raise HTTPException(status_code=401, detail="Invalid API key")
+
     url, base64_img = generate_image(prompt)
     return {"url": url, "base64": base64_img}
 
-from audio import process_voice  # Make sure this matches your file
 
 @app.post("/voice_upload")
 async def voice_endpoint(
