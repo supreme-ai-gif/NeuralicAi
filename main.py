@@ -80,82 +80,6 @@ def verify_api_key(key: str):
     keys = load_keys()
     return any(k["key"] == key for k in keys)
 
-# =====================================================
-# Pinecone Memory Integration (Pinecone v2)
-# =====================================================
-from pinecone import Pinecone, ServerlessSpec
-
-# Get API key and index name from environment
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")  # Set this in Render
-INDEX_NAME = "neuralic-memory"
-
-# Create Pinecone client
-pc = Pinecone(api_key=PINECONE_API_KEY)
-
-# Get existing indexes (list of strings)
-existing_indexes = pc.list_indexes()
-
-# Create index if it doesn't exist
-if INDEX_NAME not in existing_indexes:
-    pc.create_index(
-        name=INDEX_NAME,
-        dimension=1536,  # OpenAI embedding dimension
-        metric="cosine",
-        spec=ServerlessSpec(cloud="aws", region="us-east-1")  # adjust region if needed
-    )
-
-# Connect to index
-index = pc.Index(name=INDEX_NAME)
-
-# -------------------------------
-# Store user message in Pinecone
-def store_memory(user_id: str, text: str):
-    """
-    Convert text to embeddings and store in Pinecone.
-    """
-    from openai import OpenAI
-    openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-    # Get embeddings
-    emb_resp = openai_client.embeddings.create(
-        model="text-embedding-3-large",
-        input=text
-    )
-    vector = emb_resp.data[0].embedding
-
-    # Unique vector ID
-    import uuid
-    vector_id = str(uuid.uuid4())
-
-    # Upsert to Pinecone
-    index.upsert([(vector_id, vector, {"user_id": user_id, "text": text})])
-
-# -------------------------------
-# Retrieve user memory
-def get_memory(user_id: str, top_k: int = 5):
-    """
-    Retrieve top_k most relevant messages for a user from Pinecone.
-    """
-    from openai import OpenAI
-    openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-    # Embed a query with the user_id
-    query_text = f"Retrieve conversation for {user_id}"
-    emb_resp = openai_client.embeddings.create(
-        model="text-embedding-3-large",
-        input=query_text
-    )
-    query_vector = emb_resp.data[0].embedding
-
-    # Query Pinecone
-    result = index.query(vector=query_vector, top_k=top_k, include_metadata=True)
-
-    memory = []
-    for match in result.matches:
-        if match.metadata.get("user_id") == user_id:
-            memory.append(match.metadata.get("text"))
-
-    return memory
 
 # =====================================================
 # IMAGE GENERATION
@@ -190,7 +114,81 @@ def process_voice(user_id: str, file: UploadFile):
     response = requests.post(tts_url, json=payload)
     audio_base64 = base64.b64encode(response.content).decode() if response.status_code==200 else base64.b64encode(b"tts_error").decode()
     return ai_reply, audio_base64
+    
+# =====================================================
+# Pinecone Memory Integration (Pinecone v2)
+# =====================================================
+from pinecone import Pinecone, ServerlessSpec
+import os
 
+# Create an instance of the Pinecone client
+pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+
+# Index name
+INDEX_NAME = "neuralic-memory"
+
+# List existing indexes
+existing_indexes = pc.list_indexes()  # Returns a simple list of strings
+
+# Create the index if it doesn't exist
+if INDEX_NAME not in existing_indexes:
+    pc.create_index(
+        name=INDEX_NAME,
+        dimension=1536,       # For OpenAI embeddings
+        metric="cosine",
+        spec=ServerlessSpec(
+            cloud="aws",
+            region="us-east-1"
+        )
+    )
+
+# Connect to the index
+index = pc.Index(name=INDEX_NAME)
+
+# -------------------------------
+# Store user memory
+def store_memory(user_id: str, text: str):
+    from openai import OpenAI
+    import uuid
+
+    openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+    # Generate embedding
+    emb_resp = openai_client.embeddings.create(
+        model="text-embedding-3-large",
+        input=text
+    )
+    vector = emb_resp.data[0].embedding
+    vector_id = str(uuid.uuid4())
+
+    # Upsert into Pinecone
+    index.upsert([(vector_id, vector, {"user_id": user_id, "text": text})])
+
+# -------------------------------
+# Retrieve memory
+def get_memory(user_id: str, top_k: int = 5):
+    from openai import OpenAI
+
+    openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+    # Create query vector
+    query_text = f"Retrieve conversation for {user_id}"
+    emb_resp = openai_client.embeddings.create(
+        model="text-embedding-3-large",
+        input=query_text
+    )
+    query_vector = emb_resp.data[0].embedding
+
+    # Query Pinecone
+    result = index.query(vector=query_vector, top_k=top_k, include_metadata=True)
+
+    memory = []
+    for match in result.matches:
+        if match.metadata.get("user_id") == user_id:
+            memory.append(match.metadata.get("text"))
+
+    return memory
+    
 # =====================================================
 # CHAT LOGIC
 # =====================================================
