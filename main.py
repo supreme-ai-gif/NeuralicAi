@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from decision_maker import make_decision
 import uvicorn
 import openai
 import pinecone
@@ -203,7 +204,28 @@ async def voice_endpoint(user_id: str = Form(...), file: UploadFile = File(...),
         raise HTTPException(status_code=401, detail="Invalid API key")
     reply, audio_base64 = process_voice(user_id, file)
     return {"reply": reply, "audio": audio_base64}
+from decision_maker import make_decision
 
+@app.post("/decision")
+async def decision_endpoint(
+    user_id: str = Form(...),
+    message: str = Form(...),
+    api_key: str = Form(...)
+):
+    if not verify_api_key(api_key):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    
+    # Fetch user memory from Pinecone
+    memory = get_memory(user_id)
+    
+    # Get AI decision using GPT
+    decision = make_decision(message, memory)
+    
+    # Store the decision message in memory as well
+    store_memory(user_id, f"AI Decision: {decision['message']}")
+    
+    return decision
+    
 # =====================================================
 # FRONTEND
 # =====================================================
