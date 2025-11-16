@@ -18,7 +18,7 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allow all origins
-    allow_credentials=True,
+    allow_credentials=True, you 
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -53,11 +53,17 @@ async def image_endpoint(prompt: str = Form(...), api_key: str = Form(...)):
     url, base64_img = generate_image(prompt)
     return {"url": url, "base64": base64_img}
 
+from audio import process_voice  # Make sure this matches your file
+
 @app.post("/voice_upload")
-async def voice_endpoint(user_id: str = Form(...), file: UploadFile = File(...), api_key: str = Form(...)):
-    from api_keys import verify_api_key
+async def voice_endpoint(
+    user_id: str = Form(...),
+    file: UploadFile = File(...),
+    api_key: str = Form(...)
+):
     if not verify_api_key(api_key):
         raise HTTPException(status_code=401, detail="Invalid API key")
+
     reply, audio_base64 = process_voice(user_id, file)
     return {"reply": reply, "audio": audio_base64}
 
