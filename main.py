@@ -47,34 +47,157 @@ def verify_api_key(key: str):
     return any(k["key"] == key for k in keys)
 
 # =====================================================
-# Pinecone Memory Placeholder
+# Pinecone Memory Integration
 # =====================================================
-MEMORY_DB = {}
+import pinecone
 
-def store_memory(user_id, text):
-    if user_id not in MEMORY_DB:
-        MEMORY_DB[user_id] = []
-    MEMORY_DB[user_id].append(text)
+# Initialize Pinecone
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")  # Set this in Render
+PINECONE_ENV = os.getenv("PINECONE_ENVIRONMENT", "us-west1-gcp")  # e.g., 'us-west1-gcp'
+INDEX_NAME = "neuralic-memory"
 
-def get_memory(user_id):
-    return MEMORY_DB.get(user_id, [])
+pinecone.init(api_key=PINECONE_API_KEY, environment=PINECONE_ENV)
+
+# Create index if it doesn't exist
+if INDEX_NAME not in pinecone.list_indexes():
+    pinecone.create_index(name=INDEX_NAME, dimension=1536, metric="cosine")  # 1536 for OpenAI embeddings
+
+index = pinecone.Index(INDEX_NAME)
+
+from openai import OpenAI
+openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# -------------------------------
+# Store user message
+def store_memory(user_id: str, text: str):
+    """
+    Convert text to embeddings and store in Pinecone.
+    """
+    # Get embeddings from OpenAI
+    emb_resp = openai_client.embeddings.create(
+        model="text-embedding-3-large",
+        input=text
+    )
+    vector = emb_resp.data[0].embedding
+
+    # Use unique ID for each message
+    import uuid
+    vector_id = str(uuid.uuid4())
+
+    # Upsert to Pinecone
+    index.upsert([(vector_id, vector, {"user_id": user_id, "text": text})])
+
+# -------------------------------
+# Retrieve user memory (last N messages)
+def get_memory(user_id: str, top_k: int = 5):
+    """
+    Retrieve top_k most relevant messages for a user from Pinecone.
+    """
+    # Query Pinecone for user's messages
+    # For simplicity, we embed a dummy "user_id query" to get related vectors
+    query_text = f"Retrieve conversation for {user_id}"
+    emb_resp = openai_client.embeddings.create(
+        model="text-embedding-3-large",
+        input=query_text
+    )
+    query_vector = emb_resp.data[0].embedding
+
+    # Query Pinecone
+    result = index.query(vector=query_vector, top_k=top_k, include_metadata=True)
+
+    memory = []
+    for match in result.matches:
+        if match.metadata.get("user_id") == user_id:
+            memory.append(match.metadata.get("text"))
+
+    return memory
 
 # =====================================================
-# Placeholder Image Generator
+# Image Generation with OpenAI DALL·E
 # =====================================================
-def generate_image(prompt):
-    base64_img = base64.b64encode(b"fakeimagebytes").decode()
-    url = f"/static/images/{prompt.replace(' ', '_')}.png"
-    return url, base64_img
+import openai
+import base64
+import os
+
+openai.api_key = os.getenv("OPENAI_API_KEY")  # Make sure your key is set in Render
+
+def generate_image(prompt: str):
+    """
+    Generate an image from prompt using OpenAI DALL·E API
+    and return a base64 string and a URL path for static serving.
+    """
+
+    try:
+        response = openai.Image.create(
+            prompt=prompt,
+            n=1,
+            size="512x512"
+        )
+        # Image returned as base64
+        image_base64 = response['data'][0]['b64_json']
+        # Optional: save image to static folder
+        image_bytes = base64.b64decode(image_base64)
+        filename = f"{prompt.replace(' ', '_')}.png"
+        static_path = os.path.join("static", "images")
+        os.makedirs(static_path, exist_ok=True)
+        file_path = os.path.join(static_path, filename)
+        with open(file_path, "wb") as f:
+            f.write(image_bytes)
+
+        url = f"/static/images/{filename}"
+        return url, image_base64
+
+    except Exception as e:
+        # Fallback if API fails
+        fallback = base64.b64encode(b"image_error").decode()
+        return "/static/images/error.png", fallback
 
 # =====================================================
-# Placeholder Voice Processing
+# Voice Processing with ElevenLabs
 # =====================================================
-def process_voice(user_id, file: UploadFile):
+import requests
+import base64
+from fastapi import UploadFile
+
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")  # Set in Render
+ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"       # Example voice ID
+
+def process_voice(user_id: str, file: UploadFile):
+    """
+    Convert uploaded user voice to text (optional STT),
+    then generate AI response and return TTS audio as base64.
+    """
+
+    # --- Step 1: Read user audio ---
     audio_bytes = file.file.read()
-    text_response = f"Simulated voice response for {user_id}"
-    audio_base64 = base64.b64encode(audio_bytes).decode()
-    return text_response, audio_base64
+
+    # Optional: You can integrate STT here using OpenAI Whisper API
+    # For now, we simulate user message text
+    user_text = f"Simulated transcription of user audio by {user_id}"
+
+    # --- Step 2: AI generates response ---
+    from main import process_chat  # Use your GPT chat logic
+    ai_reply = process_chat(user_id, user_text)
+
+    # --- Step 3: Convert AI reply to speech using ElevenLabs ---
+    tts_url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "text": ai_reply,
+        "voice_settings": {"stability": 0.75, "similarity_boost": 0.75}
+    }
+
+    response = requests.post(tts_url, json=payload)
+    if response.status_code != 200:
+        # Fallback if TTS fails
+        audio_base64 = base64.b64encode(b"tts_error").decode()
+    else:
+        audio_base64 = base64.b64encode(response.content).decode()
+
+    return ai_reply, audio_base64
 
 # =====================================================
 # Chat Logic (GPT-powered)
