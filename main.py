@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from dev_keys import create_api_key, list_keys, revoke_key, verify_api_key
 import uvicorn
 
 # Import modules
@@ -26,16 +27,29 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-MASTER_PASSWORD = os.getenv("MASTER_PASSWORD", "supersecretpassword")
 
-# Admin endpoints
+MASTER_PASSWORD = "supersecretpassword"
+
 @app.post("/admin/create_key")
 async def admin_create_key(owner: str = Form(...), password: str = Form(...)):
     if password != MASTER_PASSWORD:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    from api_keys import create_api_key  # optional separate file
     key = create_api_key(owner)
     return {"success": True, "key": key}
+
+@app.get("/admin/list_keys")
+async def admin_list_keys(password: str):
+    if password != MASTER_PASSWORD:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return {"keys": list_keys()}
+
+@app.post("/admin/revoke_key")
+async def admin_revoke_key(key: str = Form(...), password: str = Form(...)):
+    if password != MASTER_PASSWORD:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    result = revoke_key(key)
+    return {"success": result}
+
 
 # AI endpoints
 @app.post("/chat")
