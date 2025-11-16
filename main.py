@@ -28,7 +28,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-templates = Jinja2Templates(directory="templates"
+templates = Jinja2Templates(directory="templates")
                             
 # ----------------------------
 # SIMPLE CHAT ENDPOINT
