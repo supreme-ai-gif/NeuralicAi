@@ -2,50 +2,32 @@
 import os
 import json
 import base64
-import uuid
 import requests
 from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-from decision_maker import make_decision
 import uvicorn
 import openai
-import pinecone
+from pinecone import Pinecone, ServerlessSpec
+from decision_maker import make_decision  # Your decision logic
 
 # =====================================================
-# CONFIGURATION
+# Constants and environment
 # =====================================================
 PORT = int(os.getenv("PORT", 10000))
 MASTER_PASSWORD = os.getenv("MASTER_PASSWORD", "supersecretpassword")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-PINECONE_ENV = os.getenv("PINECONE_ENVIRONMENT", "us-west1-gcp")
-INDEX_NAME = "neuralic-memory"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
-ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "wDsJlOXPqcvIUKdLXjDs")  # your voice ID
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "wDsJlOXPqcvIUKdLXjDs")
+
+# OpenAI client
+openai.api_key = OPENAI_API_KEY
 
 # =====================================================
-# FASTAPI APP
-# =====================================================
-app = FastAPI(title="Neuralic AI Full Server")
-
-# --- CORS Middleware ---
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # allow all origins for testing
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Mount static files and templates
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
-
-# =====================================================
-# DEV API KEY STORAGE
+# Utility: Developer API Key Storage
 # =====================================================
 DEV_KEYS_FILE = "dev_keys.json"
 if not os.path.exists(DEV_KEYS_FILE):
@@ -61,6 +43,7 @@ def save_keys(keys):
         json.dump(keys, f, indent=4)
 
 def create_api_key(owner_name: str):
+    import uuid
     key = str(uuid.uuid4())
     keys = load_keys()
     keys.append({"owner": owner_name, "key": key})
@@ -79,116 +62,86 @@ def revoke_key(key: str):
 def verify_api_key(key: str):
     keys = load_keys()
     return any(k["key"] == key for k in keys)
-# =====================================================
-# Pinecone Memory Integration (v2 fixed)
-# =====================================================
-from pinecone import Pinecone, ServerlessSpec
-import os
 
-# Create Pinecone client instance
-pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-
-# Define index name
+# =====================================================
+# Pinecone Memory Integration (v2)
+# =====================================================
 INDEX_NAME = "neuralic-memory"
+pc = Pinecone(api_key=PINECONE_API_KEY)
 
-# Get existing indexes as a simple list
+# Create index if missing
 existing_indexes = pc.list_indexes()
-
-# Create the index if it doesn't exist
 if INDEX_NAME not in existing_indexes:
     pc.create_index(
         name=INDEX_NAME,
-        dimension=1536,  # For OpenAI embeddings
-        metric="cosine",
-        spec=ServerlessSpec(
-            cloud="aws",
-            region="us-east-1"
-        )
+        dimension=1536,
+        metric='cosine',
+        spec=ServerlessSpec(cloud='aws', region='us-west-2')
     )
 
-# Connect to the index
+# Connect to index
 index = pc.Index(name=INDEX_NAME)
 
 # -------------------------------
-# Store user memory
+# Memory store/retrieve
+# -------------------------------
 def store_memory(user_id: str, text: str):
-    from openai import OpenAI
-    import uuid
-
-    openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-    # Generate embedding
-    emb_resp = openai_client.embeddings.create(
+    """Convert text to embeddings and store in Pinecone."""
+    emb_resp = openai.Embedding.create(
         model="text-embedding-3-large",
         input=text
     )
     vector = emb_resp.data[0].embedding
+    import uuid
     vector_id = str(uuid.uuid4())
-
-    # Upsert to Pinecone
     index.upsert([(vector_id, vector, {"user_id": user_id, "text": text})])
 
-# -------------------------------
-# Retrieve user memory
 def get_memory(user_id: str, top_k: int = 5):
-    from openai import OpenAI
-
-    openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-    # Create query vector
+    """Retrieve top_k relevant messages from Pinecone."""
     query_text = f"Retrieve conversation for {user_id}"
-    emb_resp = openai_client.embeddings.create(
+    emb_resp = openai.Embedding.create(
         model="text-embedding-3-large",
         input=query_text
     )
     query_vector = emb_resp.data[0].embedding
-
-    # Query Pinecone
     result = index.query(vector=query_vector, top_k=top_k, include_metadata=True)
-
-    memory = []
-    for match in result.matches:
-        if match.metadata.get("user_id") == user_id:
-            memory.append(match.metadata.get("text"))
-
+    memory = [match.metadata.get("text") for match in result.matches if match.metadata.get("user_id")==user_id]
     return memory
 
 # =====================================================
-# IMAGE GENERATION
+# Image Generation
 # =====================================================
 def generate_image(prompt: str):
     try:
         response = openai.Image.create(prompt=prompt, n=1, size="512x512")
         image_base64 = response['data'][0]['b64_json']
-        image_bytes = base64.b64decode(image_base64)
-        filename = f"{prompt.replace(' ', '_')}.png"
-        path = os.path.join("static", "images")
-        os.makedirs(path, exist_ok=True)
-        file_path = os.path.join(path, filename)
-        with open(file_path, "wb") as f:
-            f.write(image_bytes)
+        filename = f"{prompt.replace(' ','_')}.png"
+        static_path = os.path.join("static","images")
+        os.makedirs(static_path, exist_ok=True)
+        with open(os.path.join(static_path, filename),"wb") as f:
+            f.write(base64.b64decode(image_base64))
         url = f"/static/images/{filename}"
         return url, image_base64
-    except:
+    except Exception:
         fallback = base64.b64encode(b"image_error").decode()
         return "/static/images/error.png", fallback
 
 # =====================================================
-# VOICE PROCESSING
+# Voice Processing
 # =====================================================
 def process_voice(user_id: str, file: UploadFile):
     audio_bytes = file.file.read()
     user_text = f"Simulated transcription of user audio by {user_id}"
     ai_reply = process_chat(user_id, user_text)
     tts_url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
-    headers = {"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json"}
-    payload = {"text": ai_reply, "voice_settings": {"stability":0.75, "similarity_boost":0.75}}
-    response = requests.post(tts_url, json=payload)
+    headers = {"xi-api-key": ELEVENLABS_API_KEY, "Content-Type":"application/json"}
+    payload = {"text": ai_reply,"voice_settings":{"stability":0.75,"similarity_boost":0.75}}
+    response = requests.post(tts_url,json=payload)
     audio_base64 = base64.b64encode(response.content).decode() if response.status_code==200 else base64.b64encode(b"tts_error").decode()
     return ai_reply, audio_base64
-    
+
 # =====================================================
-# CHAT LOGIC
+# Chat Logic
 # =====================================================
 def process_chat(user_id: str, message: str):
     store_memory(user_id, f"User: {message}")
@@ -197,8 +150,10 @@ def process_chat(user_id: str, message: str):
     try:
         response = openai.ChatCompletion.create(
             model="gpt-4",
-            messages=[{"role":"system","content":"You are a helpful AI assistant."},
-                      {"role":"user","content":conversation}],
+            messages=[
+                {"role":"system","content":"You are a helpful AI assistant."},
+                {"role":"user","content":conversation}
+            ],
             temperature=0.7,
             max_tokens=300
         )
@@ -209,7 +164,24 @@ def process_chat(user_id: str, message: str):
     return ai_reply
 
 # =====================================================
-# ADMIN ENDPOINTS
+# FastAPI App Setup
+# =====================================================
+app = FastAPI(title="Neuralic AI Full Server")
+
+# CORS Middleware - allow all origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Change to admin URL in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
+
+# =====================================================
+# Admin Endpoints
 # =====================================================
 @app.post("/admin/create_key")
 async def admin_create_key(owner: str = Form(...), password: str = Form(...)):
@@ -230,7 +202,7 @@ async def admin_revoke_key(key: str = Form(...), password: str = Form(...)):
     return {"success": revoke_key(key)}
 
 # =====================================================
-# AI ENDPOINTS
+# AI Endpoints
 # =====================================================
 @app.post("/chat")
 async def chat_endpoint(user_id: str = Form(...), message: str = Form(...), api_key: str = Form(...)):
@@ -251,29 +223,26 @@ async def voice_endpoint(user_id: str = Form(...), file: UploadFile = File(...),
         raise HTTPException(status_code=401, detail="Invalid API key")
     reply, audio_base64 = process_voice(user_id, file)
     return {"reply": reply, "audio": audio_base64}
-from decision_maker import make_decision
 
+# =====================================================
+# Decision-making endpoint
+# =====================================================
 @app.post("/decision")
-async def decision_endpoint(
-    user_id: str = Form(...),
-    message: str = Form(...),
-    api_key: str = Form(...)
-):
+async def decision_endpoint(user_id: str = Form(...), message: str = Form(...), api_key: str = Form(...)):
     if not verify_api_key(api_key):
         raise HTTPException(status_code=401, detail="Invalid API key")
-
-    reply = decision_response(user_id, message)
+    reply = make_decision(user_id, message)  # your decision_maker logic
     return {"reply": reply}
-    
+
 # =====================================================
-# FRONTEND
+# Frontend
 # =====================================================
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 # =====================================================
-# RUN SERVER
+# Run server
 # =====================================================
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=PORT, reload=True)
