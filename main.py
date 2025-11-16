@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 import uvicorn
+from fastapi.middleware.cors import CORSMiddleware
 
 # =====================================================
 # Utility: Developer API Key Storage (dev_keys.json)
@@ -86,6 +87,16 @@ def process_chat(user_id: str, message: str):
 # FastAPI Setup
 # =====================================================
 app = FastAPI(title="Neuralic AI Full Server")
+# -----------------------------
+# CORS Middleware
+# -----------------------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # For testing. Later, replace "*" with your admin site URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
