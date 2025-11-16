@@ -77,9 +77,9 @@ async def decision_endpoint(user_id: str = Form(...),
     reply = make_decision(user_id, message)
     return {"reply": reply}
 
-# Frontend
+# Fronted 
 @app.get("/", response_class=HTMLResponse)
-async def index(request):
+async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 if __name__ == "__main__":
