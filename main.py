@@ -11,6 +11,56 @@ from image_gen import generate_image
 from voice import process_voice
 from decision_maker import make_decision
 
+# Chat endpoint
+@app.post("/chat")
+async def chat_endpoint(user_id: str = Form(...), message: str = Form(...), api_key: str = Form(...)):
+    if not verify_api_key(api_key):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    return {"reply": process_chat(user_id, message)}
+
+# Image endpoint
+@app.post("/image")
+async def image_endpoint(prompt: str = Form(...), api_key: str = Form(...)):
+    if not verify_api_key(api_key):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    url, base64_img = generate_image(prompt)
+    return {"url": url, "base64": base64_img}
+
+# Voice endpoint
+@app.post("/voice_upload")
+async def voice_endpoint(user_id: str = Form(...), file: UploadFile = File(...), api_key: str = Form(...)):
+    if not verify_api_key(api_key):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    reply, audio_base64 = process_voice(user_id, file)
+    return {"reply": reply, "audio": audio_base64}
+
+# Decision-making endpoint
+@app.post("/decision")
+async def decision_endpoint(user_id: str = Form(...), message: str = Form(...), api_key: str = Form(...)):
+    if not verify_api_key(api_key):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    reply = make_decision(user_id, message)
+    return {"reply": reply}
+
+# Admin endpoints
+@app.post("/admin/create_key")
+async def admin_create_key(owner: str = Form(...), password: str = Form(...)):
+    if password != MASTER_PASSWORD:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return {"success": True, "key": create_api_key(owner)}
+
+@app.get("/admin/list_keys")
+async def admin_list_keys(password: str):
+    if password != MASTER_PASSWORD:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return {"keys": list_keys()}
+
+@app.post("/admin/revoke_key")
+async def admin_revoke_key(key: str = Form(...), password: str = Form(...)):
+    if password != MASTER_PASSWORD:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return {"success": revoke_key(key)}
+
 app = FastAPI(title="Neuralic AI Full Server")
 
 # CORS: allow all origins for now
