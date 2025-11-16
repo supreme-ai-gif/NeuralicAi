@@ -160,7 +160,7 @@ import base64
 from fastapi import UploadFile
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")  # Set in Render
-ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"       # Example voice ID
+ELEVENLABS_VOICE_ID = "wDsJlOXPqcvIUKdLXjDs"       # Example voice ID
 
 def process_voice(user_id: str, file: UploadFile):
     """
