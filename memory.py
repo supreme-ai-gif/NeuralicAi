@@ -1,77 +1,38 @@
-# memory.py
 import os
-from pinecone import Pinecone, ServerlessSpec
+import uuid
 from openai import OpenAI
+from pinecone import Pinecone
 
-# ---------------------------
-# ENV VARIABLES
-# ---------------------------
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# -------------------------
+# Pinecone setup
+# -------------------------
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-PINECONE_INDEX = os.getenv("PINECONE_INDEX")  # your index name
-PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")  # aws or gcp region
+INDEX_NAME = "neuralic-memory"
 
-if not all([OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_INDEX, PINECONE_ENVIRONMENT]):
-    raise Exception("Missing environment variables")
-
-# ---------------------------
-# INIT CLIENTS
-# ---------------------------
 pc = Pinecone(api_key=PINECONE_API_KEY)
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
+index = pc.Index(name=INDEX_NAME)
 
-# ---------------------------
-# CREATE INDEX (IF MISSING)
-# ---------------------------
-if PINECONE_INDEX not in pc.list_indexes().names():
-    pc.create_index(
-        name=PINECONE_INDEX,
-        dimension=1536,
-        metric="cosine",
-        spec=ServerlessSpec(
-            cloud="aws",
-            region=PINECONE_ENVIRONMENT
-        )
+openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# -------------------------
+# Store and get memory
+# -------------------------
+def store_memory(user_id: str, text: str):
+    emb_resp = openai_client.embeddings.create(
+        model="text-embedding-3-large",
+        input=text
     )
+    vector = emb_resp.data[0].embedding
+    vector_id = str(uuid.uuid4())
+    index.upsert([(vector_id, vector, {"user_id": user_id, "text": text})])
 
-# ---------------------------
-# CONNECT TO THE INDEX
-# ---------------------------
-index = pc.Index(PINECONE_INDEX)
-
-# ---------------------------
-# MEMORY CLASS
-# ---------------------------
-class MemoryDB:
-    def __init__(self):
-        self.index = index
-        self.embed = openai_client
-
-    def embed_text(self, text):
-        """Generate embedding"""
-        res = self.embed.embeddings.create(
-            model="text-embedding-3-small",
-            input=text
-        )
-        return res.data[0].embedding
-
-    def store(self, user_id, text):
-        """Store memory"""
-        vec = self.embed_text(text)
-        self.index.upsert([
-            {
-                "id": user_id,
-                "values": vec,
-                "metadata": {"text": text}
-            }
-        ])
-
-    def query(self, text, top_k=5):
-        """Semantic search in memory"""
-        vec = self.embed_text(text)
-        result = self.index.query(
-            vector=vec,
-            top_k=top_k,
-            include_metadata=True
-        )
-        return result.matches
+def get_memory(user_id: str, top_k: int = 5):
+    query_text = f"Retrieve conversation for {user_id}"
+    emb_resp = openai_client.embeddings.create(
+        model="text-embedding-3-large",
+        input=query_text
+    )
+    query_vector = emb_resp.data[0].embedding
+    result = index.query(vector=query_vector, top_k=top_k, include_metadata=True)
+    memory = [m.metadata["text"] for m in result.matches if m.metadata.get("user_id") == user_id]
+    return memory
