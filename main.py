@@ -8,11 +8,9 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 import uvicorn
 
-# -------------------------------
-# -------------------------------
-# Utility functions (simulate utils.py)
-# -------------------------------
-# Dev keys storage
+# =====================================================
+# Utility: Developer API Key Storage (dev_keys.json)
+# =====================================================
 DEV_KEYS_FILE = "dev_keys.json"
 if not os.path.exists(DEV_KEYS_FILE):
     with open(DEV_KEYS_FILE, "w") as f:
@@ -47,11 +45,9 @@ def verify_api_key(key: str):
     keys = load_keys()
     return any(k["key"] == key for k in keys)
 
-# -------------------------------
-# -------------------------------
-# Pinecone memory (simplified example)
-# -------------------------------
-# This is just a placeholder; replace with your real Pinecone logic
+# =====================================================
+# Pinecone Memory Placeholder
+# =====================================================
 MEMORY_DB = {}
 
 def store_memory(user_id, text):
@@ -62,46 +58,42 @@ def store_memory(user_id, text):
 def get_memory(user_id):
     return MEMORY_DB.get(user_id, [])
 
-# -------------------------------
-# -------------------------------
-# Image generation placeholder
-# -------------------------------
+# =====================================================
+# Placeholder Image Generator
+# =====================================================
 def generate_image(prompt):
-    # placeholder for real image generation (OpenAI or local model)
     base64_img = base64.b64encode(b"fakeimagebytes").decode()
-    url = f"/static/images/{prompt.replace(' ','_')}.png"
+    url = f"/static/images/{prompt.replace(' ', '_')}.png"
     return url, base64_img
 
-# -------------------------------
-# -------------------------------
-# Voice processing placeholder
-# -------------------------------
+# =====================================================
+# Placeholder Voice Processing
+# =====================================================
 def process_voice(user_id, file: UploadFile):
     audio_bytes = file.file.read()
     text_response = f"Simulated voice response for {user_id}"
     audio_base64 = base64.b64encode(audio_bytes).decode()
     return text_response, audio_base64
 
-# -------------------------------
-# -------------------------------
-# Chat logic (simplified GPT placeholder)
-# -------------------------------
+# =====================================================
+# Chat Logic (Placeholder)
+# =====================================================
 def process_chat(user_id: str, message: str):
     store_memory(user_id, message)
     return f"Echo from AI for {user_id}: {message}"
 
-# -------------------------------
-# -------------------------------
-# FastAPI app setup
-# -------------------------------
+# =====================================================
+# FastAPI Setup
+# =====================================================
 app = FastAPI(title="Neuralic AI Full Server")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-# -------------------------------
-# Admin endpoints
-# -------------------------------
 MASTER_PASSWORD = os.getenv("MASTER_PASSWORD", "supersecretpassword")
+
+# =====================================================
+# ADMIN ENDPOINTS (FULLY INTEGRATED)
+# =====================================================
 
 @app.post("/admin/create_key")
 async def admin_create_key(owner: str = Form(...), password: str = Form(...)):
@@ -123,13 +115,19 @@ async def admin_revoke_key(key: str = Form(...), password: str = Form(...)):
     result = revoke_key(key)
     return {"success": result}
 
-# -------------------------------
-# AI endpoints
-# -------------------------------
+# =====================================================
+# AI ENDPOINTS
+# =====================================================
+
 @app.post("/chat")
-async def chat_endpoint(user_id: str = Form(...), message: str = Form(...), api_key: str = Form(...)):
+async def chat_endpoint(
+    user_id: str = Form(...),
+    message: str = Form(...),
+    api_key: str = Form(...)
+):
     if not verify_api_key(api_key):
         raise HTTPException(status_code=401, detail="Invalid API key")
+
     reply = process_chat(user_id, message)
     return {"reply": reply}
 
@@ -137,26 +135,32 @@ async def chat_endpoint(user_id: str = Form(...), message: str = Form(...), api_
 async def image_endpoint(prompt: str = Form(...), api_key: str = Form(...)):
     if not verify_api_key(api_key):
         raise HTTPException(status_code=401, detail="Invalid API key")
+
     url, base64_img = generate_image(prompt)
     return {"url": url, "base64": base64_img}
 
 @app.post("/voice_upload")
-async def voice_endpoint(user_id: str = Form(...), file: UploadFile = File(...), api_key: str = Form(...)):
+async def voice_endpoint(
+    user_id: str = Form(...),
+    file: UploadFile = File(...),
+    api_key: str = Form(...)
+):
     if not verify_api_key(api_key):
         raise HTTPException(status_code=401, detail="Invalid API key")
+
     text_response, audio_base64 = process_voice(user_id, file)
     return {"reply": text_response, "audio": audio_base64}
 
-# -------------------------------
-# Frontend dashboard placeholder
-# -------------------------------
+# =====================================================
+# FRONTEND (Dashboard)
+# =====================================================
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
-# -------------------------------
-# Run server
-# -------------------------------
+# =====================================================
+# Run Server (python main.py)
+# =====================================================
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 10000))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
