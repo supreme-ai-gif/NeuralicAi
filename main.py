@@ -10,7 +10,7 @@ import uvicorn
 from audio_utils import process_voice
 from image_gen import generate_image
 from memory import store_memory, get_memory
-from decision_maker import decision_response
+from decision_maker import make_decision
 from chat_logic import process_chat  # define your GPT chat logic here
 
 # FastAPI setup
@@ -62,11 +62,13 @@ async def voice_endpoint(user_id: str = Form(...), file: UploadFile = File(...),
     return {"reply": reply, "audio": audio_base64}
 
 @app.post("/decision")
-async def decision_endpoint(user_id: str = Form(...), message: str = Form(...), api_key: str = Form(...)):
-    from api_keys import verify_api_key
+async def decision_endpoint(user_id: str = Form(...),
+                            message: str = Form(...),
+                            api_key: str = Form(...)):
     if not verify_api_key(api_key):
         raise HTTPException(status_code=401, detail="Invalid API key")
-    reply = decision_response(user_id, message)
+
+    reply = make_decision(user_id, message)
     return {"reply": reply}
 
 # Frontend
