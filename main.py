@@ -1,99 +1,93 @@
-import os
-from fastapi import FastAPI, Form, UploadFile, Request, File, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
+from fastapi import FastAPI, Form, UploadFile, File
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-from dev_keys import create_api_key, list_keys, revoke_key, verify_api_key
 import uvicorn
 
-# Import modules
-from audio_utils import process_voice
-from image_gen import generate_image
+# ----------------------------
+# IMPORT YOUR MODULES
+# ----------------------------
 from memory import store_memory, get_memory
 from decision_maker import make_decision
-from chat_logic import process_chat  # define your GPT chat logic here
+from audio_utils import process_voice
+from image_gen import generate_image
 
-# FastAPI setup
-app = FastAPI()
+# ----------------------------
+# INIT APP
+# ----------------------------
+app = FastAPI(title="Neuralic AI Server")
+
+# ----------------------------
+# ENABLE CORS FOR ALL ORIGINS
+# ----------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
-    allow_credentials=True, 
+    allow_origins=["*"],        # allow any frontend
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
-
-
-MASTER_PASSWORD = "supersecretpassword"
-
-@app.post("/admin/create_key")
-async def admin_create_key(owner: str = Form(...), password: str = Form(...)):
-    if password != MASTER_PASSWORD:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    key = create_api_key(owner)
-    return {"success": True, "key": key}
-
-@app.get("/admin/list_keys")
-async def admin_list_keys(password: str):
-    if password != MASTER_PASSWORD:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    return {"keys": list_keys()}
-
-@app.post("/admin/revoke_key")
-async def admin_revoke_key(key: str = Form(...), password: str = Form(...)):
-    if password != MASTER_PASSWORD:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    result = revoke_key(key)
-    return {"success": result}
-
-# AI endpoints
+# ----------------------------
+# SIMPLE CHAT ENDPOINT
+# ----------------------------
 @app.post("/chat")
-async def chat_endpoint(user_id: str = Form(...), message: str = Form(...), api_key: str = Form(...)):
-    from api_keys import verify_api_key
-    if not verify_api_key(api_key):
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    return {"reply": process_chat(user_id, message)}
-
-
-@app.post("/image")
-async def image_endpoint(prompt: str = Form(...), api_key: str = Form(...)):
-    if not verify_api_key(api_key):
-        raise HTTPException(status_code=401, detail="Invalid API key")
-
-    url, base64_img = generate_image(prompt)
-    return {"url": url, "base64": base64_img}
-
-
-@app.post("/voice_upload")
-async def voice_endpoint(
+async def chat_endpoint(
     user_id: str = Form(...),
-    file: UploadFile = File(...),
-    api_key: str = Form(...)
+    message: str = Form(...)
 ):
-    if not verify_api_key(api_key):
-        raise HTTPException(status_code=401, detail="Invalid API key")
+    store_memory(user_id, f"User: {message}")
+    ai_reply = make_decision(user_id, message)
+    store_memory(user_id, f"AI: {ai_reply}")
+    return {"reply": ai_reply}
 
-    reply, audio_base64 = process_voice(user_id, file)
-    return {"reply": reply, "audio": audio_base64}
-
+# ----------------------------
+# DECISION MAKER ENDPOINT
+# ----------------------------
 @app.post("/decision")
-async def decision_endpoint(user_id: str = Form(...),
-                            message: str = Form(...),
-                            api_key: str = Form(...)):
-    if not verify_api_key(api_key):
-        raise HTTPException(status_code=401, detail="Invalid API key")
-
+async def decision_endpoint(
+    user_id: str = Form(...),
+    message: str = Form(...)
+):
     reply = make_decision(user_id, message)
     return {"reply": reply}
 
-# Fronted 
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+# ----------------------------
+# VOICE ENDPOINT
+# ----------------------------
+@app.post("/voice")
+async def voice_endpoint(
+    user_id: str = Form(...),
+    file: UploadFile = File(...)
+):
+    reply, audio_b64 = process_voice(user_id, file)
+    return {"reply": reply, "audio": audio_b64}
 
+# ----------------------------
+# IMAGE ENDPOINT
+# ----------------------------
+@app.post("/image")
+async def image_endpoint(prompt: str = Form(...)):
+    url, base64_img = generate_image(prompt)
+    return {"url": url, "base64": base64_img}
+
+# ----------------------------
+# BASIC HOMEPAGE
+# ----------------------------
+@app.get("/", response_class=HTMLResponse)
+async def index():
+    return """
+    <h1>Neuralic AI Server Running</h1>
+    <p>Available endpoints:</p>
+    <ul>
+        <li>/chat</li>
+        <li>/decision</li>
+        <li>/voice</li>
+        <li>/image</li>
+    </ul>
+    """
+
+# ----------------------------
+# RUN SERVER
+# ----------------------------
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 10000)), reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=10000, reload=True)
