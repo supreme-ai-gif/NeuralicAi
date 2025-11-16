@@ -214,17 +214,9 @@ async def decision_endpoint(
 ):
     if not verify_api_key(api_key):
         raise HTTPException(status_code=401, detail="Invalid API key")
-    
-    # Fetch user memory from Pinecone
-    memory = get_memory(user_id)
-    
-    # Get AI decision using GPT
-    decision = make_decision(message, memory)
-    
-    # Store the decision message in memory as well
-    store_memory(user_id, f"AI Decision: {decision['message']}")
-    
-    return decision
+
+    reply = decision_response(user_id, message)
+    return {"reply": reply}
     
 # =====================================================
 # FRONTEND
