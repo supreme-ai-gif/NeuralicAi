@@ -76,7 +76,7 @@ if INDEX_NAME not in existing_indexes:
         name=INDEX_NAME,
         dimension=1536,
         metric='cosine',
-        spec=ServerlessSpec(cloud='aws', region='us-west-2')
+        spec=ServerlessSpec(cloud='aws', region='us-east-1')
     )
 
 # Connect to index
